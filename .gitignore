@@ -1,0 +1,48 @@
+# env
+.venv/
+venv/
+env/
+.env
+.env.local
+uv.lock
+CLAUDE.md
+.claude/
+.cursorrules
+.cursor/
+.json
+
+# artifacts
+.coverage
+dist/
+build/
+_build/
+docs/build/
+*.egg-info/
+*/__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyo
+*.pyd
+*.pyc
+
+# outputs
+wandb/
+outputs/
+outputs_s3/
+eval_results/
+logs/
+
+Miniconda3-latest-Linux-x86_64.sh
+
+# development
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# WIPs
+wip/
+old/
+scripts/
+notebooks/Miniconda3-latest-Linux-x86_64.sh
+Miniconda3-latest-Linux-x86_64.sh
