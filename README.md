@@ -46,3 +46,15 @@ Safety masking forces important positions to be kept:
 - `MIN_MEMORY_BUFFER`: extra retained history
 
 Generation-time compression is handled separately by `RobustEvaluationPress` in [kv_distill.py](kv_distill.py).
+
+## Note: 4k/8k/16k length strategy
+
+For multiple target lengths (e.g., 4k/8k/16k), we could try a **curriculum → mixed sampling hybrid**:
+
+- Phase 1 (warm start): mostly 4k until training is stable (e.g., first 10–20% of steps: 90% 4k / 10% 8k).
+- Phase 2 (ramp): introduce 8k as a meaningful fraction (e.g., next 30–40%: 50% 4k / 50% 8k).
+- Phase 3 (target mix): include 16k and gradually increase its share (e.g., start 40/40/20, end 25/35/40 for 4k/8k/16k).
+
+Early 4k stabilizes general behavior and avoids cache-collapse; later mixing prevents catastrophic forgetting; slow 16k ramp reduces instability.
+
+Practical tips: keep a small fixed eval set at each length and gate changes on all three; if compression is aggressive, ramp 16k more slowly.
