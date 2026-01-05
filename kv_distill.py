@@ -165,28 +165,29 @@ def train_step_truncated(teacher, student, optimizer, input_ids, block_size, tok
     scorer = KnormPress(compression_ratio=COMPRESSION_RATIO)
     
     # --- CONFIGURATION FOR SAFETY ---
-    # Guarantees the "48" and "April" survive in short prompts
     MIN_MEMORY_BUFFER = 32  
     SAFE_WINDOW = WINDOW_SIZE 
 
     # print(f"\n{'='*20} START TRAINING STEP {'='*20}")
 
     for i in range(0, total_seq_len, block_size):
+        # For loop processes the prefill sequence in blocks
         end_idx = min(i + block_size, total_seq_len)
         if end_idx - i < 16: break
         
         chunk = input_ids[:, i:end_idx]
         chunk_len = chunk.size(1)
         
-        # 1. Explicit Position IDs (RoPE Fix)
-        current_pos_ids = torch.arange(i, i + chunk_len, device=DEVICE).unsqueeze(0)
-
         # 2. Forward Passes
+        # Generate teacher output of the chunk (no kv-cache restriction)
         with torch.no_grad():
             t_out = teacher(chunk, past_key_values=teacher_cache, use_cache=True)
             teacher_cache = t_out.past_key_values
             teacher_logits = t_out.logits
 
+        # Generate student output of the chunk (w kv-cache restriction)
+        # Note the position_ids argument, this is because student_cache length is not consistent with the true positions, i.e, this gives explicit Position IDs (RoPE Fix)
+        current_pos_ids = torch.arange(i, i + chunk_len, device=DEVICE).unsqueeze(0)
         s_out = student(
             chunk, 
             past_key_values=student_cache, 
@@ -205,47 +206,41 @@ def train_step_truncated(teacher, student, optimizer, input_ids, block_size, tok
             log_target=False
         ) * (TEACHER_TEMP ** 2)
         
+        # Compute optimizer update
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
         num_blocks += 1
 
-        # -----------------------------------------------------------
-        # FIX: Dynamic Floor Compression (Safe for Training)
-        # -----------------------------------------------------------
+        # 4. KV-Cache Compression of the chunk for the STUDENT only
+        
+        # 4i) Detach to prevent gradients through time
         raw_cache = s_out.past_key_values
         detached_cache = safe_detach_cache(raw_cache)
 
-        # Identify Special Tokens (EOS, EOT) in the current sequence
-        # We want to force-keep these so the model knows when to stop.
+        # 4ii) Identify Special Tokens (EOS, EOT) to force-keep them (so the model knows when to stop).
         current_seq = input_ids[:, :end_idx] # (batch, seq_len)
         
         eos_id = tokenizer.eos_token_id
         eot_id = tokenizer.convert_tokens_to_ids("<|eot_id|>")
-        
         # Create mask (1 for special tokens, 0 otherwise)
         special_mask = (current_seq == eos_id)
         # Check if eot_id is valid (usually it is for Llama 3)
         if isinstance(eot_id, int) and eot_id != tokenizer.unk_token_id:
             special_mask = special_mask | (current_seq == eot_id)
         
-        # A. Calculate Harsh Target (e.g. 10% of 100 = 10 tokens)
+        # 4iii) Calculate target budget (e.g. 10% of 100 = 10 tokens)
         target_budget = int(end_idx * COMPRESSION_RATIO)
-        
-        # B. Apply Safety Floor (Window + 32 tokens history)
-        # If we have 100 tokens, 10% is 10. But we NEED 64+32=96.
-        # So we force budget to 96.
+        # but also considering safety floor (Window + 32 tokens history)
         min_safe_budget = SAFE_WINDOW + MIN_MEMORY_BUFFER
-        
-        real_budget = max(target_budget, min_safe_budget)
-        
-        # Clamp if sequence is shorter than the floor
+        real_budget = max(target_budget, min_safe_budget)   
+        # and clamp if sequence is shorter than the floor
         if real_budget > end_idx:
             real_budget = end_idx
-            
+
+        # 4iv) Compress the detached_cache into student_cache using ScorePress
         compressed_cache = DynamicCache()
-        
         for layer_idx in range(len(detached_cache)):
             k, v = detached_cache[layer_idx]
             seq_len = k.shape[2]
