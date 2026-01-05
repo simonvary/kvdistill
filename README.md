@@ -1,4 +1,4 @@
-# `train_step_truncated`: KV Distillation in One Page
+# KV Distillation
 
 `train_step_truncated(...)` in [kv_distill.py](kv_distill.py) trains a LoRA student to match a teacher **while the student runs with a compressed KV cache**.
 
