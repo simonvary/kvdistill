@@ -7,18 +7,13 @@
 - Splits a long `input_ids` sequence into `block_size` chunks (prefill simulation).
 - For each chunk:
   - Teacher forward pass with full cache (no compression).
-  - Student forward pass using its (compressed) cache **plus explicit `position_ids`** (RoPE fix).
+  - Student forward pass using its (compressed) cache **plus explicit `position_ids`** (to fix RoPE).
   - KL distillation loss on logits (temperature `TEACHER_TEMP`) and one optimizer step.
   - Compress student `past_key_values` and carry the compressed cache into the next chunk.
 
 Key implications:
 
-- The compression budget is recomputed **every chunk** based on the prefix length so far (`end_idx`).
 - “Kept” tokens are **not permanent**: after the next chunk, previously kept tokens can be evicted (except forced-kept sink/window/EOS/EOT).
-
-### Why explicit `position_ids`
-
-Because the student cache is compressed, “cache length” != true token position. Passing `position_ids = i..i+chunk_len-1` keeps RoPE aligned to the real sequence positions.
 
 ### How KV compression works (student only)
 
@@ -47,7 +42,7 @@ Safety masking forces important positions to be kept:
 
 Generation-time compression is handled separately by `RobustEvaluationPress` in [kv_distill.py](kv_distill.py).
 
-## Note: 4k/8k/16k length strategy
+## Note on training strategies to get 4k/8k/16k lengths
 
 For multiple target lengths (e.g., 4k/8k/16k), we could try a **curriculum → mixed sampling hybrid**:
 
